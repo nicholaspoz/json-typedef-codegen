@@ -155,6 +155,18 @@ fn main() -> Result<()> {
         log.finish("TypeScript", &codegen_info);
     }
 
+    if let Some(out_dir) = matches.value_of("swift-out") {
+        log.start("Swift", out_dir);
+
+        let target = jtd_codegen_target_swift::Target::new();
+
+        let codegen_info =
+            jtd_codegen::codegen(&target, root_name.clone(), &schema, &Path::new(out_dir))
+                .with_context(|| "Failed to generate Swift code")?;
+
+        log.finish("Swift", &codegen_info);
+    }
+
     log.flush();
     Ok(())
 }

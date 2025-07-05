@@ -110,3 +110,10 @@ args:
       long: typescript-out
       takes_value: true
       value_name: dir
+
+  # Swift
+  - swift-out:
+      help: Output directory for Swift code generation
+      long: swift-out
+      takes_value: true
+      value_name: dir
