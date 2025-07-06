@@ -36,7 +36,7 @@ impl Target {
 }
 
 impl jtd_codegen::target::Target for Target {
-    type FileState = ();
+    type FileState = FileState;
 
     fn strategy(&self) -> target::Strategy {
         target::Strategy {
@@ -71,13 +71,16 @@ impl jtd_codegen::target::Target for Target {
         }
     }
 
-    fn expr(&self, _state: &mut (), metadata: metadata::Metadata, expr: target::Expr) -> String {
+    fn expr(&self, state: &mut FileState, metadata: metadata::Metadata, expr: target::Expr) -> String {
         if let Some(s) = metadata.get("swiftType").and_then(|v| v.as_str()) {
             return s.into();
         }
 
         match expr {
-            target::Expr::Empty => "Any".into(),
+            target::Expr::Empty => {
+                state.needs_any_codable = true;
+                "AnyCodable".into()
+            }
             target::Expr::Boolean => "Bool".into(),
             target::Expr::Int8 => "Int8".into(),
             target::Expr::Uint8 => "UInt8".into(),
@@ -98,7 +101,7 @@ impl jtd_codegen::target::Target for Target {
     fn item(
         &self,
         out: &mut dyn Write,
-        _state: &mut (),
+        state: &mut FileState,
         item: target::Item,
     ) -> Result<Option<String>> {
         Ok(match item {
@@ -114,6 +117,61 @@ impl jtd_codegen::target::Target for Target {
                 )?;
                 writeln!(out)?;
                 writeln!(out, "import Foundation")?;
+                
+                if state.needs_any_codable {
+                    writeln!(out)?;
+                    writeln!(out, "// AnyCodable for handling arbitrary JSON values")?;
+                    writeln!(out, "public struct AnyCodable: Codable {{")?;
+                    writeln!(out, "    public let value: Any")?;
+                    writeln!(out, "    ")?;
+                    writeln!(out, "    public init(_ value: Any) {{")?;
+                    writeln!(out, "        self.value = value")?;
+                    writeln!(out, "    }}")?;
+                    writeln!(out, "    ")?;
+                    writeln!(out, "    public init(from decoder: Decoder) throws {{")?;
+                    writeln!(out, "        let container = try decoder.singleValueContainer()")?;
+                    writeln!(out, "        if let intValue = try? container.decode(Int.self) {{")?;
+                    writeln!(out, "            value = intValue")?;
+                    writeln!(out, "        }} else if let doubleValue = try? container.decode(Double.self) {{")?;
+                    writeln!(out, "            value = doubleValue")?;
+                    writeln!(out, "        }} else if let stringValue = try? container.decode(String.self) {{")?;
+                    writeln!(out, "            value = stringValue")?;
+                    writeln!(out, "        }} else if let boolValue = try? container.decode(Bool.self) {{")?;
+                    writeln!(out, "            value = boolValue")?;
+                    writeln!(out, "        }} else if container.decodeNil() {{")?;
+                    writeln!(out, "            value = NSNull()")?;
+                    writeln!(out, "        }} else if let arrayValue = try? container.decode([AnyCodable].self) {{")?;
+                    writeln!(out, "            value = arrayValue.map {{ $0.value }}")?;
+                    writeln!(out, "        }} else if let dictValue = try? container.decode([String: AnyCodable].self) {{")?;
+                    writeln!(out, "            value = dictValue.mapValues {{ $0.value }}")?;
+                    writeln!(out, "        }} else {{")?;
+                    writeln!(out, "            throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: \"Unable to decode value\"))")?;
+                    writeln!(out, "        }}")?;
+                    writeln!(out, "    }}")?;
+                    writeln!(out, "    ")?;
+                    writeln!(out, "    public func encode(to encoder: Encoder) throws {{")?;
+                    writeln!(out, "        var container = encoder.singleValueContainer()")?;
+                    writeln!(out, "        if let intValue = value as? Int {{")?;
+                    writeln!(out, "            try container.encode(intValue)")?;
+                    writeln!(out, "        }} else if let doubleValue = value as? Double {{")?;
+                    writeln!(out, "            try container.encode(doubleValue)")?;
+                    writeln!(out, "        }} else if let stringValue = value as? String {{")?;
+                    writeln!(out, "            try container.encode(stringValue)")?;
+                    writeln!(out, "        }} else if let boolValue = value as? Bool {{")?;
+                    writeln!(out, "            try container.encode(boolValue)")?;
+                    writeln!(out, "        }} else if value is NSNull {{")?;
+                    writeln!(out, "            try container.encodeNil()")?;
+                    writeln!(out, "        }} else if let arrayValue = value as? [Any] {{")?;
+                    writeln!(out, "            try container.encode(arrayValue.map {{ AnyCodable($0) }})")?;
+                    writeln!(out, "        }} else if let dictValue = value as? [String: Any] {{")?;
+                    writeln!(out, "            try container.encode(dictValue.mapValues {{ AnyCodable($0) }})")?;
+                    writeln!(out, "        }} else {{")?;
+                    writeln!(out, "            throw EncodingError.invalidValue(value, EncodingError.Context(codingPath: encoder.codingPath, debugDescription: \"Unable to encode value\"))")?;
+                    writeln!(out, "        }}")?;
+                    writeln!(out, "    }}")?;
+                    writeln!(out, "}}")?;
+                    writeln!(out)?;
+                }
 
                 None
             }
@@ -307,6 +365,11 @@ impl jtd_codegen::target::Target for Target {
             }
         })
     }
+}
+
+#[derive(Default)]
+pub struct FileState {
+    needs_any_codable: bool,
 }
 
 fn description(metadata: &BTreeMap<String, Value>, indent: usize) -> String {
